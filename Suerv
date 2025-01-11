@@ -1,0 +1,140 @@
+package frc.robot.subsystems;
+
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.kinematics.SwerveModulePosition;
+import edu.wpi.first.math.kinematics.SwerveModuleState;
+
+import com.revrobotics.CANSparkMax;
+import com.revrobotics.CANSparkMaxLowLevel.MotorType;
+import com.revrobotics.SparkAbsoluteEncoder.Type;
+import com.revrobotics.SparkPIDController;
+import com.revrobotics.AbsoluteEncoder;
+import com.revrobotics.RelativeEncoder;
+
+public class MAXSwerveModule {
+  private final CANSparkMax m_drivingSparkMax;
+  private final CANSparkMax m_turningSparkMax;
+
+  private final RelativeEncoder m_drivingEncoder;
+  private final AbsoluteEncoder m_turningEncoder;
+
+  private final SparkPIDController m_drivingPIDController;
+  private final SparkPIDController m_turningPIDController;
+
+  private double m_chassisAngularOffset = 0;
+  private SwerveModuleState m_desiredState = new SwerveModuleState(0.0, new Rotation2d());
+
+  // Assign variables for CAN IDs and PID constants
+  private static final int DRIVING_CAN_ID = 1; // Update with actual CAN ID
+  private static final int TURNING_CAN_ID = 2; // Update with actual CAN ID
+  private static final double DRIVING_P = 0.1; // Example value, update with actual PID constant
+  private static final double DRIVING_I = 0.0; // Example value, update with actual PID constant
+  private static final double DRIVING_D = 0.0; // Example value, update with actual PID constant
+  private static final double DRIVING_FF = 0.0; // Example value, update with actual PID constant
+  private static final double TURNING_P = 0.1; // Example value, update with actual PID constant
+  private static final double TURNING_I = 0.0; // Example value, update with actual PID constant
+  private static final double TURNING_D = 0.0; // Example value, update with actual PID constant
+  private static final double TURNING_FF = 0.0; // Example value, update with actual PID constant
+
+  // Example wheel diameter and gear ratio
+  private static final double WHEEL_DIAMETER = 0.1; // Update with actual wheel diameter in meters
+  private static final double GEAR_RATIO = 6.0; // Update with actual gear ratio
+
+  // Calculate conversion factors
+  private static final double DRIVING_POSITION_CONVERSION_FACTOR = (Math.PI * WHEEL_DIAMETER) / GEAR_RATIO;
+  private static final double DRIVING_VELOCITY_CONVERSION_FACTOR = (Math.PI * WHEEL_DIAMETER) / (60 * GEAR_RATIO);
+  private static final double TURNING_POSITION_CONVERSION_FACTOR = 2 * Math.PI;
+  private static final double TURNING_VELOCITY_CONVERSION_FACTOR = 2 * Math.PI / 60;
+
+  public MAXSwerveModule(int drivingCANId, int turningCANId, double chassisAngularOffset) {
+    m_drivingSparkMax = new CANSparkMax(drivingCANId, MotorType.kBrushed);
+    m_turningSparkMax = new CANSparkMax(turningCANId, MotorType.kBrushed);
+
+    m_drivingSparkMax.restoreFactoryDefaults();
+    m_turningSparkMax.restoreFactoryDefaults();
+
+    m_drivingEncoder = m_drivingSparkMax.getEncoder();
+    m_turningEncoder = m_turningSparkMax.getAbsoluteEncoder(Type.kDutyCycle);
+    m_drivingPIDController = m_drivingSparkMax.getPIDController();
+    m_turningPIDController = m_turningSparkMax.getPIDController();
+    m_drivingPIDController.setFeedbackDevice(m_drivingEncoder);
+    m_turningPIDController.setFeedbackDevice(m_turningEncoder);
+
+    m_drivingEncoder.setPositionConversionFactor(DRIVING_POSITION_CONVERSION_FACTOR);
+    m_drivingEncoder.setVelocityConversionFactor(DRIVING_VELOCITY_CONVERSION_FACTOR);
+
+    m_turningEncoder.setPositionConversionFactor(TURNING_POSITION_CONVERSION_FACTOR);
+    m_turningEncoder.setVelocityConversionFactor(TURNING_VELOCITY_CONVERSION_FACTOR);
+
+    m_turningEncoder.setInverted(false);
+
+    m_turningPIDController.setPositionPIDWrappingEnabled(true);
+    m_turningPIDController.setPositionPIDWrappingMinInput(0);
+    m_turningPIDController.setPositionPIDWrappingMaxInput(2 * Math.PI);
+
+    m_drivingPIDController.setP(DRIVING_P);
+    m_drivingPIDController.setI(DRIVING_I);
+    m_drivingPIDController.setD(DRIVING_D);
+    m_drivingPIDController.setFF(DRIVING_FF);
+    m_drivingPIDController.setOutputRange(-1.0, 1.0);
+
+    m_turningPIDController.setP(TURNING_P);
+    m_turningPIDController.setI(TURNING_I);
+    m_turningPIDController.setD(TURNING_D);
+    m_turningPIDController.setFF(TURNING_FF);
+    m_turningPIDController.setOutputRange(-1.0, 1.0);
+
+    m_drivingSparkMax.setIdleMode(CANSparkMax.IdleMode.kBrake);
+    m_turningSparkMax.setIdleMode(CANSparkMax.IdleMode.kBrake);
+    m_drivingSparkMax.setSmartCurrentLimit(35);
+    m_turningSparkMax.setSmartCurrentLimit(35);
+
+    m_drivingSparkMax.burnFlash();
+    m_turningSparkMax.burnFlash();
+
+    m_chassisAngularOffset = chassisAngularOffset;
+    m_desiredState.angle = new Rotation2d(m_turningEncoder.getPosition());
+    m_drivingEncoder.setPosition(0);
+  }
+
+  public SwerveModuleState getState() {
+    return new SwerveModuleState(m_drivingEncoder.getVelocity(),
+      new Rotation2d(m_turningEncoder.getPosition() - m_chassisAngularOffset));
+  }
+
+  public SwerveModulePosition getPosition() {
+    return new SwerveModulePosition(
+      m_drivingEncoder.getPosition(),
+      new Rotation2d(m_turningEncoder.getPosition() - m_chassisAngularOffset));
+  }
+
+  public void setDesiredState(SwerveModuleState desiredState) {
+    SwerveModuleState correctedDesiredState = new SwerveModuleState();
+    correctedDesiredState.speedMetersPerSecond = desiredState.speedMetersPerSecond;
+    correctedDesiredState.angle = desiredState.angle.plus(Rotation2d.fromRadians(m_chassisAngularOffset));
+
+    SwerveModuleState optimizedDesiredState = SwerveModuleState.optimize(correctedDesiredState,
+      new Rotation2d(m_turningEncoder.getPosition()));
+
+    m_drivingPIDController.setReference(optimizedDesiredState.speedMetersPerSecond, CANSparkMax.ControlType.kVelocity);
+    m_turningPIDController.setReference(optimizedDesiredState.angle.getRadians(), CANSparkMax.ControlType.kPosition);
+
+    m_desiredState = desiredState;
+  }
+
+  public void resetEncoders() {
+    m_drivingEncoder.setPosition(0);
+  }
+
+  public SwerveModuleState getDesiredState(){
+    return m_desiredState;
+  }
+  
+  public double getDrivingVoltage(){
+    return m_drivingSparkMax.getOutputCurrent();
+  }
+
+  public double getTurningVoltage(){
+    return m_turningSparkMax.getOutputCurrent();
+  }
+}
